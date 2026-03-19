@@ -1,0 +1,101 @@
+# ======================
+# Python
+# ======================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+
+# ======================
+# Environment & Secrets
+# ======================
+.env
+.venv/
+venv/
+ENV/
+env/
+*.local
+
+# ======================
+# IDE
+# ======================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ======================
+# Model Weights (large files)
+# ======================
+*.pth
+*.pt
+*.onnx
+*.pkl
+*.h5
+*.ckpt
+
+# Keep model folder structure
+!experiments/pretrained_models/.gitkeep
+!gfpgan/weights/.gitkeep
+!api/gfpgan/weights/.gitkeep
+!api/models/.gitkeep
+
+# ======================
+# Temp & Output Files
+# ======================
+outputs/
+api/outputs/
+api/temp/
+temp/
+tmp/
+*.tmp
+_resized_*
+
+# Temp scripts (generated at runtime)
+temp_*.py
+
+# ======================
+# Test Images (optional - uncomment to ignore)
+# ======================
+# img*.jpg
+# img*.png
+
+# ======================
+# External Repos/Large Folders
+# ======================
+SwinIR/
+Bringing-Old-Photos-Back-to-Life/
+
+# ======================
+# Logs
+# ======================
+*.log
+logs/
+nohup.out
+
+# ======================
+# OS Files
+# ======================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ======================
+# Jupyter
+# ======================
+.ipynb_checkpoints/
+*.ipynb
+
+# ======================
+# ngrok
+# ======================
+ngrok.exe
+*.ngrok

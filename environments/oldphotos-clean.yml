@@ -1,0 +1,26 @@
+# Conda Environment for Bringing Old Photos Back to Life
+# Using same base as rs-clean for compatibility
+
+name: oldphotos-clean
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - torch==2.0.1
+    - torchvision==0.15.2
+    - opencv-python==4.9.0.80
+    - pillow==10.2.0
+    - numpy==1.24.3
+    - scikit-image==0.21.0
+    - easydict==1.10
+    - PyYAML==6.0
+    - dominate==2.8.0
+    - dill==0.3.7
+    - tensorboardX==2.6.2
+    - scipy==1.11.2
+    - einops==0.6.1
+    - matplotlib==3.8.0
