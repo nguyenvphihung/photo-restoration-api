@@ -63,8 +63,9 @@ _resized_*
 temp_*.py
 
 # ======================
-# Test Images (optional - uncomment to ignore)
+# Test Images & Assets
 # ======================
+img/
 # img*.jpg
 # img*.png
 
