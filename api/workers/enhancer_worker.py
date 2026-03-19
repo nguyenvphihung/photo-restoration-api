@@ -114,9 +114,16 @@ def enhance(request: EnhanceRequest):
             raise HTTPException(status_code=404, detail="Input image not found")
 
         print(f"Enhancing: {request.image_path}")
-        input_img = cv2.imread(request.image_path, cv2.IMREAD_COLOR)
+        input_img = cv2.imread(request.image_path, cv2.IMREAD_UNCHANGED)
         if input_img is None:
             raise HTTPException(status_code=400, detail="Cannot read image")
+
+        # Handle RGBA (4-channel) images → convert to BGR
+        if input_img.ndim == 3 and input_img.shape[2] == 4:
+            input_img = cv2.cvtColor(input_img, cv2.COLOR_BGRA2BGR)
+        elif input_img.ndim == 2:
+            # Grayscale → BGR
+            input_img = cv2.cvtColor(input_img, cv2.COLOR_GRAY2BGR)
 
         original_h, original_w = input_img.shape[:2]
 

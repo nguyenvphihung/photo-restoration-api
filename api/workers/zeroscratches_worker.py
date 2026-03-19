@@ -28,9 +28,16 @@ def process(request: ProcessRequest):
         if not os.path.exists(request.image_path):
             raise HTTPException(status_code=404, detail="Input image not found")
         
-        original_image = cv2.imread(request.image_path)
+        original_image = cv2.imread(request.image_path, cv2.IMREAD_UNCHANGED)
         if original_image is None:
             raise HTTPException(status_code=400, detail="Cannot read image")
+        
+        # Handle RGBA (4-channel) images → convert to BGR
+        if original_image.ndim == 3 and original_image.shape[2] == 4:
+            original_image = cv2.cvtColor(original_image, cv2.COLOR_BGRA2BGR)
+        elif original_image.ndim == 2:
+            # Grayscale → BGR
+            original_image = cv2.cvtColor(original_image, cv2.COLOR_GRAY2BGR)
             
         image_pil = Image.fromarray(cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB))
         

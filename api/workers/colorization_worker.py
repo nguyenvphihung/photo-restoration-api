@@ -226,8 +226,9 @@ def colorize(request: ColorizeRequest):
             
         print(f"Colorizing image: {request.image_path}")
         
-        # Open and convert to grayscale RGB (to match training)
-        img = Image.open(request.image_path)
+        # Open and force to RGB first (strips alpha / palette),
+        # then convert to grayscale RGB (to match training)
+        img = Image.open(request.image_path).convert('RGB')
         img = img.convert('L').convert('RGB')
         original_size = img.size
         
@@ -249,6 +250,10 @@ def colorize(request: ColorizeRequest):
         # Denormalize AB channels and merge with L
         L_denorm = (L + 1.0) * 50.0
         ab_pred_denorm = ab_pred * 128.0
+        
+        # Clamp to valid LAB ranges to prevent black output
+        L_denorm = L_denorm.clamp(0, 100)
+        ab_pred_denorm = ab_pred_denorm.clamp(-128, 127)
         
         lab_result = torch.cat([L_denorm, ab_pred_denorm], dim=1)
         rgb_result = lab_to_rgb(lab_result)

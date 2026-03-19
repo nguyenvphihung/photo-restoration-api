@@ -61,6 +61,7 @@ _resized_*
 
 # Temp scripts (generated at runtime)
 temp_*.py
+.tmp_launchers/
 
 # ======================
 # Test Images & Assets

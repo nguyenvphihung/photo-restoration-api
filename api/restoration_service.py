@@ -23,9 +23,18 @@ def resize_if_needed(image_path: str,
     Resize image if it exceeds max dimensions to prevent GPU OOM.
     Returns: (resized_path, was_resized, original_size)
     """
-    img = cv2.imread(image_path)
+    img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         return image_path, False, None
+
+    # Handle RGBA (4-channel) images → convert to BGR
+    if img.ndim == 3 and img.shape[2] == 4:
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+        # Re-save as 3-channel so downstream workers don't hit the same issue
+        cv2.imwrite(image_path, img)
+    elif img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        cv2.imwrite(image_path, img)
 
     h, w = img.shape[:2]
     original_size = (w, h)
