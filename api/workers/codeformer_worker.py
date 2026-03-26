@@ -25,10 +25,11 @@ app = FastAPI(title="CodeFormer Worker")
 
 restorer = None
 face_helper = None
+bg_upsampler = None
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def init_models():
-    global restorer, face_helper
+    global restorer, face_helper, bg_upsampler
     print(f"Loading CodeFormer Model into memory on {device}...")
 
     # Load architecture from CodeFormer/basicsr/archs
@@ -58,7 +59,7 @@ def init_models():
     
     # Initialize FaceRestoreHelper (from facexlib/facelib)
     face_helper = FaceRestoreHelper(
-        upscale_factor=1,
+        upscale_factor=2,
         face_size=512,
         crop_ratio=(1, 1),
         det_model='retinaface_resnet50',
@@ -67,7 +68,31 @@ def init_models():
         device=device
     )
     
-    print("CodeFormer loaded successfully (fidelity=0.7).")
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    from basicsr.utils.realesrgan_utils import RealESRGANer
+
+    bg_model_name = "RealESRGAN_x2plus"
+    bg_model_url  = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"
+    bg_model_path = os.path.join(weights_dir, f"{bg_model_name}.pth")
+
+    if not os.path.exists(bg_model_path):
+        load_file_from_url(url=bg_model_url, model_dir=weights_dir, progress=True, file_name=None)
+
+    bg_model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+    # GTX 1650/1660 don't support fp16 properly → produces NaN → black output
+    use_half = False
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        no_half_gpu_list = ['1650', '1660']
+        if not any(g in gpu_name for g in no_half_gpu_list):
+            use_half = True
+        print(f"  GPU: {gpu_name}, half={use_half}")
+    bg_upsampler = RealESRGANer(
+        scale=2, model_path=bg_model_path, model=bg_model,
+        tile=400, tile_pad=40, pre_pad=0, half=use_half
+    )
+    
+    print("CodeFormer loaded successfully (fidelity=0.7, upscale=2, bg_upsampler=RealESRGAN).")
 
 
 class EnhanceRequest(BaseModel):
@@ -137,9 +162,17 @@ def enhance(request: EnhanceRequest):
             face_helper.add_restored_face(restored_face)
 
         if num_faces > 0:
+            # Upsample the background before pasting faces back
+            bg_img = None
+            if bg_upsampler is not None:
+                try:
+                    bg_img = bg_upsampler.enhance(img, outscale=2)[0]
+                except Exception as e:
+                    print(f"  WARNING: CodeFormer bg_upsampler failed: {e}")
+
             face_helper.get_inverse_affine(None)
             # Paste faces back into the original image
-            restored_img = face_helper.paste_faces_to_input_image()
+            restored_img = face_helper.paste_faces_to_input_image(upsample_img=bg_img)
         else:
             print("  Falling back to original image because no face detected.")
             restored_img = input_img

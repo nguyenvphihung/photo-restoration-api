@@ -136,8 +136,7 @@ def _execute_pipeline(input_image_path: str,
         # Output paths for each step
         step1_path       = str(outputs_dir / 'step1_zeroscratches.jpg')
         step2_path       = str(outputs_dir / 'step2_colorized.jpg')
-        step3_path       = str(outputs_dir / 'step3_enhanced.jpg')      # Enhancer comes 3rd now
-        step4_path       = str(outputs_dir / 'step4_face_restore.jpg')  # Face Restore comes 4th (LAST)
+        step3_path       = str(outputs_dir / 'step3_face_restore.jpg')
         final_path       = str(outputs_dir / 'final_output.jpg')
         intermediate_path = None
         faces_detected   = 0
@@ -150,7 +149,7 @@ def _execute_pipeline(input_image_path: str,
             # STEP 1: ZeroScratches — remove scratches / noise from the original
             # ------------------------------------------------------------------
             if run_restore:
-                print("[Pipeline] Step 1/4: ZeroScratches (scratch removal)...")
+                print("[Pipeline] Step 1/3: ZeroScratches (scratch removal)...")
                 try:
                     resp = client.post(ZEROSCRATCHES_URL, json={
                         "image_path": current_img_path,
@@ -172,13 +171,10 @@ def _execute_pipeline(input_image_path: str,
             #   if this step ran after face restore.
             # ------------------------------------------------------------------
             if run_color:
-                # If enhance follows, we need an intermediate file; otherwise write to final
-                if run_restore:
-                    out_path = step2_path if (run_restore or run_enhance) else final_path
-                else:
-                    out_path = step2_path if run_enhance else final_path
+                # If restore follows, we write to an intermediate file
+                out_path = step2_path if run_restore else final_path
 
-                print("[Pipeline] Step 2/4: Colorization...")
+                print("[Pipeline] Step 2/3: Colorization...")
                 try:
                     resp = client.post(COLORIZATION_URL, json={
                         "image_path": current_img_path,
@@ -195,37 +191,10 @@ def _execute_pipeline(input_image_path: str,
                     return {'success': False, 'error': f'Colorization failed: {exc}'}
 
             # ------------------------------------------------------------------
-            # STEP 3: Enhancer — ESRGAN upscale entire image (background + faces)
-            #   MUST run BEFORE face restore so that:
-            #   1. Background & clothing get quality improvement
-            #   2. Face restore runs LAST → sharp faces are never degraded
-            # ------------------------------------------------------------------
-            if run_enhance:
-                out_path = step3_path if run_restore else final_path
-                print("[Pipeline] Step 3/4: Enhancer (ESRGAN whole-image improvement)...")
-                try:
-                    resp = client.post(ENHANCER_URL, json={
-                        "image_path": current_img_path,
-                        "output_path": out_path
-                    })
-                    resp.raise_for_status()
-                    res = resp.json()
-                    if not res.get('success'):
-                        return {'success': False, 'error': 'Enhancer worker failed'}
-                    current_img_path = out_path
-                    if not intermediate_path:
-                        intermediate_path = out_path
-                    print(f"[Pipeline] Step 3 done. blur_score={res.get('blur_score')}, "
-                          f"strength={res.get('sharpen_strength_used')}")
-                except Exception as exc:
-                    return {'success': False, 'error': f'Enhancement failed: {exc}'}
-
-            # ------------------------------------------------------------------
-            # STEP 4: Adaptive Face Restore (GFPGAN or CodeFormer) — LAST STEP
-            #   Runs on the already-enhanced image so faces are as sharp as possible
-            #   and no downstream step will degrade them.
-            #   - Portrait (Face >= 5% area) -> GFPGAN (sharp, high quality)
-            #   - Group / Far away (Face < 5%) -> CodeFormer (robust, no hallucination)
+            # STEP 3: Adaptive Face Restore & Background Upsample
+            #   - Portrait (Face >= 5% area) -> GFPGAN
+            #   - Group / Far away (Face < 5%) -> CodeFormer
+            #   (Both models internally use RealESRGAN to upscale the background)
             # ------------------------------------------------------------------
             if run_restore:
                 # Smart Routing logic
@@ -237,7 +206,7 @@ def _execute_pipeline(input_image_path: str,
                     target_url = CODEFORMER_URL
                     model_name = "CodeFormer"
                 
-                print(f"[Pipeline] Step 4/4: Face Restoration (FINAL STEP)...")
+                print(f"[Pipeline] Step 3/3: Face & Background Restoration...")
                 print(f"  Max face ratio: {face_ratio*100:.1f}% -> Routing to {model_name}")
                 
                 try:
@@ -254,7 +223,7 @@ def _execute_pipeline(input_image_path: str,
                     current_img_path = final_path
                     if not intermediate_path:
                         intermediate_path = final_path
-                    print(f"[Pipeline] Step 4 done. Faces detected: {faces_detected} by {model_name}")
+                    print(f"[Pipeline] Step 3 done. Faces detected: {faces_detected} by {model_name}")
                 except Exception as exc:
                     return {'success': False, 'error': f'{model_name} failed: {exc}'}
 

@@ -25,33 +25,40 @@ def init_models():
     if not os.path.exists(gfpgan_path):
         raise RuntimeError(f"GFPGANv1.4.pth not found at: {gfpgan_path}")
 
-    # -----------------------------------------------------------------------
-    # THIẾT KẾ: upscale=1, bg_upsampler=None
-    # -----------------------------------------------------------------------
-    # Vấn đề với upscale=2 + bg_upsampler (cách làm trước):
-    #
-    #   Khi GFPGAN dùng bg_upsampler (RealESRGAN) để upscale nền lên 2x:
-    #   • Nếu bg_upsampler fail (OOM, NaN, tiling issue trên một số GPU/CPU)
-    #     → nó trả về nền đen nhưng vùng mặt vẫn ổn
-    #     → kết quả: vignette đen quanh mặt — đúng lỗi đang thấy
-    #   • Thêm nữa, enhancer_worker cũng ESRGAN upscale 2x ở bước sau
-    #     → tổng cộng 4x upscaling → lãng phí và tạo thêm cơ hội fail
-    #
-    # Giải pháp: GFPGAN chỉ làm đúng 1 việc — restore mặt, giữ nguyên size
-    #   • upscale=1  → output cùng kích thước với input, KHÔNG upscale
-    #   • bg_upsampler=None → không động đến nền, nền giữ nguyên 100%
-    #   • Không có RealESRGAN trong worker này → không có black risk từ ESRGAN
-    #   • enhancer_worker (bước 4) đã chạy ESRGAN toàn ảnh (cả mặt lẫn nền)
-    #     → chất lượng tổng thể vẫn được nâng lên ở đúng bước đó
-    # -----------------------------------------------------------------------
+    from basicsr.archs.rrdbnet_arch import RRDBNet
+    from realesrgan import RealESRGANer
+    from basicsr.utils.download_util import load_file_from_url
+
+    # Set up background upsampler
+    model_name = "RealESRGAN_x2plus"
+    model_url  = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"
+    bg_model_path = os.path.join(weights_dir, f"{model_name}.pth")
+    if not os.path.exists(bg_model_path):
+        load_file_from_url(url=model_url, model_dir=weights_dir, progress=True, file_name=None)
+        
+    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
+                    num_block=23, num_grow_ch=32, scale=2)
+    # GTX 1650/1660 don't support fp16 properly → produces NaN → black output
+    use_half = False
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        no_half_gpu_list = ['1650', '1660']
+        if not any(g in gpu_name for g in no_half_gpu_list):
+            use_half = True
+        print(f"  GPU: {gpu_name}, half={use_half}")
+    bg_upsampler = RealESRGANer(
+        scale=2, model_path=bg_model_path, model=model,
+        tile=400, tile_pad=40, pre_pad=0, half=use_half
+    )
+
     restorer = GFPGANer(
         model_path=gfpgan_path,
-        upscale=1,            # giữ nguyên kích thước — face-only restore, không upscale
+        upscale=2,            # upscale 2x directly here
         arch='clean',
         channel_multiplier=2,
-        bg_upsampler=None,    # không upscale nền ở đây
+        bg_upsampler=bg_upsampler,    # Upscale background too!
     )
-    print("GFPGAN loaded. upscale=1, bg_upsampler=None (face-only restore).")
+    print("GFPGAN loaded. upscale=2, bg_upsampler=RealESRGAN (face+background restore).")
 
 
 class EnhanceRequest(BaseModel):
@@ -91,12 +98,12 @@ def enhance(request: EnhanceRequest):
             has_aligned=False,
             only_center_face=False,
             paste_back=True,
-            weight=0.7,   # 70% restored / 30% original → nét hơn, vẫn tự nhiên
+            weight=0.7,
         )
 
         # ----------------------------------------------------------------
-        # Validate output: nếu restored_img là None hoặc gần đen
-        # thì dùng input gốc thay thế (an toàn tuyệt đối)
+        # Validate: if bg_upsampler failed → black background
+        # Two-pass fix: retry WITHOUT bg_upsampler to keep face restoration
         # ----------------------------------------------------------------
         use_img = input_img  # default fallback
         faces_detected = 0
@@ -104,12 +111,36 @@ def enhance(request: EnhanceRequest):
         if restored_img is not None:
             mean_brightness = float(restored_img.mean())
             if mean_brightness < 5.0:
-                print(f"  WARNING: GFPGAN output near-black (mean={mean_brightness:.1f}). "
-                      f"Using input image as fallback.")
+                print(f"  WARNING: bg_upsampler failed (mean={mean_brightness:.1f}). "
+                      f"Retrying WITHOUT bg_upsampler...")
+                # Temporarily disable bg_upsampler and set upscale=1
+                old_bg = restorer.bg_upsampler
+                old_upscale = restorer.upscale
+                restorer.bg_upsampler = None
+                restorer.upscale = 1
+                try:
+                    cropped_faces2, restored_faces2, restored_img2 = restorer.enhance(
+                        input_img,
+                        has_aligned=False,
+                        only_center_face=False,
+                        paste_back=True,
+                        weight=0.7,
+                    )
+                    if restored_img2 is not None and float(restored_img2.mean()) > 5.0:
+                        use_img = restored_img2
+                        faces_detected = len(cropped_faces2) if cropped_faces2 else 0
+                        print(f"  Fallback OK. Faces: {faces_detected}")
+                    else:
+                        print("  Fallback also failed. Using original input.")
+                except Exception as e2:
+                    print(f"  Fallback enhance failed: {e2}. Using original input.")
+                finally:
+                    restorer.bg_upsampler = old_bg
+                    restorer.upscale = old_upscale
             else:
                 use_img        = restored_img
                 faces_detected = len(cropped_faces) if cropped_faces else 0
-                print(f"  GFPGAN done. Faces: {faces_detected}, "
+                print(f"  GFPGAN done (with bg_upsampler). Faces: {faces_detected}, "
                       f"mean brightness: {mean_brightness:.1f}")
         else:
             print("  WARNING: GFPGAN returned None. Using input as fallback.")
