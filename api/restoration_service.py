@@ -10,6 +10,7 @@ ZEROSCRATCHES_URL = "http://127.0.0.1:8001/process"
 GFPGAN_URL        = "http://127.0.0.1:8002/enhance"
 COLORIZATION_URL  = "http://127.0.0.1:8003/colorize"
 ENHANCER_URL      = "http://127.0.0.1:8004/enhance"
+CODEFORMER_URL    = "http://127.0.0.1:8005/enhance"
 
 # Max input resolution (to prevent OOM on 4GB GPU)
 MAX_INPUT_WIDTH  = 800
@@ -70,6 +71,32 @@ def run_full_pipeline(input_image_path: str, **_) -> Dict[str, Any]:
 
 
 # ============================================================================
+# UTILITIES
+# ============================================================================
+def estimate_max_face_ratio(image_path: str) -> float:
+    """
+    Returns the Area Ratio of the largest face detected using fast Haar Cascades.
+    0.0 if no face detected.
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        return 0.0
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Load default OpenCV face cascade
+    cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+    face_cascade = cv2.CascadeClassifier(cascade_path)
+    
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4)
+    if len(faces) == 0:
+        return 0.0
+        
+    img_area = img.shape[0] * img.shape[1]
+    max_face_area = max([w * h for (x, y, w, h) in faces])
+    return max_face_area / img_area
+
+
+# ============================================================================
 # CORE PIPELINE
 # ============================================================================
 
@@ -108,8 +135,9 @@ def _execute_pipeline(input_image_path: str,
 
         # Output paths for each step
         step1_path       = str(outputs_dir / 'step1_zeroscratches.jpg')
-        step2_path       = str(outputs_dir / 'step2_colorized.jpg')    # colorization comes 2nd now
-        step3_path       = str(outputs_dir / 'step3_gfpgan.jpg')       # GFPGAN comes 3rd
+        step2_path       = str(outputs_dir / 'step2_colorized.jpg')
+        step3_path       = str(outputs_dir / 'step3_enhanced.jpg')      # Enhancer comes 3rd now
+        step4_path       = str(outputs_dir / 'step4_face_restore.jpg')  # Face Restore comes 4th (LAST)
         final_path       = str(outputs_dir / 'final_output.jpg')
         intermediate_path = None
         faces_detected   = 0
@@ -138,10 +166,10 @@ def _execute_pipeline(input_image_path: str,
                     return {'success': False, 'error': f'ZeroScratches failed: {exc}'}
 
             # ------------------------------------------------------------------
-            # STEP 2: Colorization — MUST run before GFPGAN.
+            # STEP 2: Colorization — MUST run before face restore.
             #   colorization_worker converts input to grayscale internally,
-            #   so GFPGAN's face restoration (color + detail) would be lost
-            #   if this step ran after GFPGAN.
+            #   so face restoration's (color + detail) would be lost
+            #   if this step ran after face restore.
             # ------------------------------------------------------------------
             if run_color:
                 # If enhance follows, we need an intermediate file; otherwise write to final
@@ -167,52 +195,68 @@ def _execute_pipeline(input_image_path: str,
                     return {'success': False, 'error': f'Colorization failed: {exc}'}
 
             # ------------------------------------------------------------------
-            # STEP 3: GFPGAN — restore faces on the colorized image.
-            #   Now runs AFTER colorization so its output is not discarded.
-            #   bg_upsampler is now RealESRGAN (set in gfpgan_worker.py),
-            #   so the background also benefits from upscaling.
+            # STEP 3: Enhancer — ESRGAN upscale entire image (background + faces)
+            #   MUST run BEFORE face restore so that:
+            #   1. Background & clothing get quality improvement
+            #   2. Face restore runs LAST → sharp faces are never degraded
             # ------------------------------------------------------------------
-            if run_restore:
-                out_path = step3_path if run_enhance else final_path
-                print("[Pipeline] Step 3/4: GFPGAN (face restoration)...")
+            if run_enhance:
+                out_path = step3_path if run_restore else final_path
+                print("[Pipeline] Step 3/4: Enhancer (ESRGAN whole-image improvement)...")
                 try:
-                    resp = client.post(GFPGAN_URL, json={
+                    resp = client.post(ENHANCER_URL, json={
                         "image_path": current_img_path,
                         "output_path": out_path
                     })
                     resp.raise_for_status()
                     res = resp.json()
                     if not res.get('success'):
-                        return {'success': False, 'error': 'GFPGAN worker failed'}
-                    faces_detected   = res.get('faces_detected', 0)
+                        return {'success': False, 'error': 'Enhancer worker failed'}
                     current_img_path = out_path
                     if not intermediate_path:
                         intermediate_path = out_path
-                    print(f"[Pipeline] Step 3 done. Faces detected: {faces_detected}")
+                    print(f"[Pipeline] Step 3 done. blur_score={res.get('blur_score')}, "
+                          f"strength={res.get('sharpen_strength_used')}")
                 except Exception as exc:
-                    return {'success': False, 'error': f'GFPGAN failed: {exc}'}
+                    return {'success': False, 'error': f'Enhancement failed: {exc}'}
 
             # ------------------------------------------------------------------
-            # STEP 4: Enhancer — sharpen the final result
+            # STEP 4: Adaptive Face Restore (GFPGAN or CodeFormer) — LAST STEP
+            #   Runs on the already-enhanced image so faces are as sharp as possible
+            #   and no downstream step will degrade them.
+            #   - Portrait (Face >= 5% area) -> GFPGAN (sharp, high quality)
+            #   - Group / Far away (Face < 5%) -> CodeFormer (robust, no hallucination)
             # ------------------------------------------------------------------
-            if run_enhance:
-                print("[Pipeline] Step 4/4: Enhancer (sharpening)...")
+            if run_restore:
+                # Smart Routing logic
+                face_ratio = estimate_max_face_ratio(current_img_path)
+                if face_ratio >= 0.05:
+                    target_url = GFPGAN_URL
+                    model_name = "GFPGAN"
+                else:
+                    target_url = CODEFORMER_URL
+                    model_name = "CodeFormer"
+                
+                print(f"[Pipeline] Step 4/4: Face Restoration (FINAL STEP)...")
+                print(f"  Max face ratio: {face_ratio*100:.1f}% -> Routing to {model_name}")
+                
                 try:
-                    resp = client.post(ENHANCER_URL, json={
+                    resp = client.post(target_url, json={
                         "image_path": current_img_path,
                         "output_path": final_path
                     })
                     resp.raise_for_status()
                     res = resp.json()
                     if not res.get('success'):
-                        return {'success': False, 'error': 'Enhancer worker failed'}
+                        return {'success': False, 'error': f'{model_name} worker failed'}
+                    
+                    faces_detected   = res.get('faces_detected', 0)
                     current_img_path = final_path
                     if not intermediate_path:
                         intermediate_path = final_path
-                    print(f"[Pipeline] Step 4 done. blur_score={res.get('blur_score')}, "
-                          f"strength={res.get('sharpen_strength_used')}")
+                    print(f"[Pipeline] Step 4 done. Faces detected: {faces_detected} by {model_name}")
                 except Exception as exc:
-                    return {'success': False, 'error': f'Enhancement failed: {exc}'}
+                    return {'success': False, 'error': f'{model_name} failed: {exc}'}
 
         # ------------------------------------------------------------------
         # Read final image for size info

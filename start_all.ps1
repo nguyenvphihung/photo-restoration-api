@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Khoi dong toan bo he thong Photo Restoration API chi bang 1 lenh.
-    Mo 5 cua so PowerShell rieng biet cho 4 Workers + 1 API Gateway.
+    Mo 6 cua so PowerShell rieng biet cho 5 Workers + 1 API Gateway.
 
 .USAGE
     Mo PowerShell tai thu muc goc cua du an, roi chay:
@@ -69,7 +69,7 @@ Write-Host "  Project: $PROJECT_ROOT"
 Write-Host ""
 
 # --- Worker 1: ZeroScratches (port 8001) ---
-Write-Host "[1/5] Khoi dong ZeroScratches Worker (port 8001)..."
+Write-Host "[1/6] Khoi dong ZeroScratches Worker (port 8001)..."
 Start-Worker `
     -Name "Worker1_ZeroScratches_8001" `
     -CondaEnv $ENV_ZEROSCRATCHES `
@@ -80,7 +80,7 @@ Write-Host "  [OK] ZeroScratches"
 Start-Sleep -Seconds 2
 
 # --- Worker 2: GFPGAN (port 8002) ---
-Write-Host "[2/5] Khoi dong GFPGAN Worker (port 8002)..."
+Write-Host "[2/6] Khoi dong GFPGAN Worker (port 8002)..."
 Start-Worker `
     -Name "Worker2_GFPGAN_8002" `
     -CondaEnv $ENV_GFPGAN `
@@ -91,7 +91,7 @@ Write-Host "  [OK] GFPGAN"
 Start-Sleep -Seconds 2
 
 # --- Worker 3: Colorization (port 8003) ---
-Write-Host "[3/5] Khoi dong Colorization Worker (port 8003)..."
+Write-Host "[3/6] Khoi dong Colorization Worker (port 8003)..."
 Start-Worker `
     -Name "Worker3_Colorization_8003" `
     -CondaEnv $ENV_GFPGAN `
@@ -102,7 +102,7 @@ Write-Host "  [OK] Colorization"
 Start-Sleep -Seconds 2
 
 # --- Worker 4: Enhancer (port 8004) ---
-Write-Host "[4/5] Khoi dong Enhancer Worker (port 8004)..."
+Write-Host "[4/6] Khoi dong Enhancer Worker (port 8004)..."
 Start-Worker `
     -Name "Worker4_Enhancer_8004" `
     -CondaEnv $ENV_GFPGAN `
@@ -112,8 +112,19 @@ Write-Host "  [OK] Enhancer"
 
 Start-Sleep -Seconds 3
 
+# --- Worker 5: CodeFormer (port 8005) ---
+Write-Host "[5/6] Khoi dong CodeFormer Worker (port 8005)..."
+Start-Worker `
+    -Name "Worker5_CodeFormer_8005" `
+    -CondaEnv $ENV_GFPGAN `
+    -PythonScript "api/workers/codeformer_worker.py" `
+    -WorkDir $PROJECT_ROOT
+Write-Host "  [OK] CodeFormer"
+
+Start-Sleep -Seconds 3
+
 # --- API Gateway (port 8000) ---
-Write-Host "[5/5] Khoi dong FastAPI Gateway (port 8000)..."
+Write-Host "[6/6] Khoi dong FastAPI Gateway (port 8000)..."
 
 $apiScript = Join-Path $TEMP_SCRIPTS "API_Gateway_8000.ps1"
 @"
@@ -137,7 +148,7 @@ Write-Host "  [OK] API Gateway"
 # ============================================================================
 Write-Host ""
 Write-Host "============================================================"
-Write-Host "   TAT CA 5 DICH VU DA DUOC KHOI DONG!"
+Write-Host "   TAT CA 6 DICH VU DA DUOC KHOI DONG!"
 Write-Host "============================================================"
 Write-Host ""
 Write-Host "  Doi khoang 15-30 giay de tat ca model AI load xong."

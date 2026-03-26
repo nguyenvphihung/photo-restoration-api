@@ -46,12 +46,12 @@ def init_models():
     # -----------------------------------------------------------------------
     restorer = GFPGANer(
         model_path=gfpgan_path,
-        upscale=2,            # giữ nguyên kích thước
+        upscale=1,            # giữ nguyên kích thước — face-only restore, không upscale
         arch='clean',
         channel_multiplier=2,
         bg_upsampler=None,    # không upscale nền ở đây
     )
-    print("GFPGAN loaded. upscale=2, bg_upsampler=None (face-only restore).")
+    print("GFPGAN loaded. upscale=1, bg_upsampler=None (face-only restore).")
 
 
 class EnhanceRequest(BaseModel):
@@ -91,7 +91,7 @@ def enhance(request: EnhanceRequest):
             has_aligned=False,
             only_center_face=False,
             paste_back=True,
-            weight=0.5,   # blend 50% restored / 50% original → tự nhiên hơn
+            weight=0.7,   # 70% restored / 30% original → nét hơn, vẫn tự nhiên
         )
 
         # ----------------------------------------------------------------

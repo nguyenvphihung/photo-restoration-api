@@ -159,28 +159,39 @@ def lab_to_rgb(lab_tensor):
     fy = (L + 16) / 116
     fx = a / 500 + fy
     fz = fy - b_ch / 200
-    
+
     epsilon = 0.008856
     kappa = 903.3
-    
-    x = torch.where(fx.pow(3) > epsilon, fx.pow(3), (116 * fx - 16) / kappa)
+
+    # Clamp fx^3, fz^3 to non-negative to avoid NaN from pow() on negatives
+    fx3 = fx.pow(3).clamp(min=0)
+    fz3 = fz.pow(3).clamp(min=0)
+
+    x = torch.where(fx3 > epsilon, fx3, (116 * fx - 16) / kappa)
     y = torch.where(L > kappa * epsilon, ((L + 16) / 116).pow(3), L / kappa)
-    z = torch.where(fz.pow(3) > epsilon, fz.pow(3), (116 * fz - 16) / kappa)
-    
-    x = x * 0.95047
-    z = z * 1.08883
-    
+    z = torch.where(fz3 > epsilon, fz3, (116 * fz - 16) / kappa)
+
+    # Clamp XYZ to non-negative (out-of-gamut values can be negative)
+    x = x.clamp(min=0) * 0.95047
+    y = y.clamp(min=0)
+    z = z.clamp(min=0) * 1.08883
+
     r = x * 3.2404542 - y * 1.5371385 - z * 0.4985314
     g = -x * 0.9692660 + y * 1.8760108 + z * 0.0415560
     b = x * 0.0556434 - y * 0.2040259 + z * 1.0572252
-    
+
     rgb = torch.cat([r, g, b], dim=1)
-    
+
+    # CRITICAL: clamp rgb to non-negative before pow(1/2.4)
+    # Negative values from out-of-gamut colors would produce NaN → all-black pixels
+    rgb = rgb.clamp(min=0)
+
     mask = rgb > 0.0031308
-    rgb[mask] = 1.055 * rgb[mask].pow(1/2.4) - 0.055
-    rgb[~mask] = 12.92 * rgb[~mask]
-    
-    return rgb.clamp(0, 1)
+    rgb_out = rgb.clone()
+    rgb_out[mask] = 1.055 * rgb[mask].pow(1 / 2.4) - 0.055
+    rgb_out[~mask] = 12.92 * rgb[~mask]
+
+    return rgb_out.clamp(0, 1)
 
 # ============================================================================
 # FASTAPI WORKER SETUP
