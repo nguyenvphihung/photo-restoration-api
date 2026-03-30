@@ -54,6 +54,7 @@ env/
 outputs/
 api/outputs/
 api/temp/
+api/static/results/
 temp/
 tmp/
 *.tmp

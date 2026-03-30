@@ -1,0 +1,95 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    container_name: photo-restoration-gateway
+    working_dir: /app/api
+    env_file:
+      - api/.env
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:8000}
+      LOCAL_RESULTS_DIR: ${LOCAL_RESULTS_DIR:-static/results}
+      ZEROSCRATCHES_URL: http://zeroscratches:8001/process
+      COLORIZATION_URL: http://colorization:8002/colorize
+      GFPGAN_URL: http://gfpgan:8003/enhance
+      CODEFORMER_URL: http://codeformer:8004/enhance
+      PIPELINE_HTTP_TIMEOUT_SECONDS: ${PIPELINE_HTTP_TIMEOUT_SECONDS:-60}
+      ALLOW_MODEL_DOWNLOADS: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./api/temp:/app/api/temp
+      - ./api/static/results:/app/api/static/results
+      - ./outputs:/app/outputs
+    depends_on:
+      - zeroscratches
+      - colorization
+      - gfpgan
+      - codeformer
+    restart: unless-stopped
+
+  zeroscratches:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        ENV_FILE: environments/rs-clean.yml
+    container_name: photo-restoration-zeroscratches
+    command: ["conda", "run", "--no-capture-output", "-n", "rs-clean", "python", "api/workers/zeroscratches_worker.py"]
+    environment:
+      ALLOW_MODEL_DOWNLOADS: "false"
+    volumes:
+      - ./api/temp:/app/api/temp
+      - ./outputs:/app/outputs
+      - ./experiments/pretrained_models:/app/experiments/pretrained_models:ro
+    restart: unless-stopped
+
+  colorization:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        ENV_FILE: environments/gfpgan-clean.yml
+    container_name: photo-restoration-colorization
+    command: ["conda", "run", "--no-capture-output", "-n", "gfpgan-clean", "python", "api/workers/colorization_worker.py"]
+    environment:
+      ALLOW_MODEL_DOWNLOADS: "false"
+    volumes:
+      - ./api/temp:/app/api/temp
+      - ./outputs:/app/outputs
+      - ./experiments/pretrained_models:/app/experiments/pretrained_models:ro
+      - ./colorization_model_final.pth:/app/colorization_model_final.pth:ro
+    restart: unless-stopped
+
+  gfpgan:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        ENV_FILE: environments/gfpgan-clean.yml
+    container_name: photo-restoration-gfpgan
+    command: ["conda", "run", "--no-capture-output", "-n", "gfpgan-clean", "python", "api/workers/gfpgan_worker.py"]
+    environment:
+      ALLOW_MODEL_DOWNLOADS: "false"
+    volumes:
+      - ./api/temp:/app/api/temp
+      - ./outputs:/app/outputs
+      - ./experiments/pretrained_models:/app/experiments/pretrained_models:ro
+    restart: unless-stopped
+
+  codeformer:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+      args:
+        ENV_FILE: environments/gfpgan-clean.yml
+    container_name: photo-restoration-codeformer
+    command: ["conda", "run", "--no-capture-output", "-n", "gfpgan-clean", "python", "api/workers/codeformer_worker.py"]
+    environment:
+      ALLOW_MODEL_DOWNLOADS: "false"
+    volumes:
+      - ./api/temp:/app/api/temp
+      - ./outputs:/app/outputs
+      - ./experiments/pretrained_models:/app/experiments/pretrained_models:ro
+    restart: unless-stopped

@@ -7,29 +7,31 @@ Run: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 """
 
 import os
-import sys
 import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
-import httpx
-from PIL import Image
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 # Import services
-from restoration_service import run_restoration_pipeline
-from cloudinary_service import init_cloudinary, upload_restoration_results
+from cloudinary_service import get_storage_mode, init_cloudinary, upload_restoration_results
 
 # Initialize Cloudinary
 init_cloudinary()
+
+API_DIR = Path(__file__).resolve().parent
+STATIC_DIR = API_DIR / "static"
+RESULTS_DIR = STATIC_DIR / "results"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Initialize FastAPI
 app = FastAPI(
@@ -37,6 +39,7 @@ app = FastAPI(
     description="AI-powered old photo restoration using ZeroScratches + GFPGAN",
     version="1.0.0"
 )
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # CORS - Allow Spring Boot and ReactJS
 spring_boot_url = os.getenv('SPRING_BOOT_URL', 'http://localhost:8080')
@@ -71,6 +74,7 @@ class RestoreResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     message: str
+    storage: Optional[str] = None
 
 
 
@@ -79,7 +83,8 @@ async def root():
     """Health check endpoint"""
     return HealthResponse(
         status="ok",
-        message="Photo Restoration API is running"
+        message="Photo Restoration API is running",
+        storage=get_storage_mode(),
     )
 
 
@@ -88,11 +93,9 @@ async def health():
     """Health check endpoint"""
     return HealthResponse(
         status="healthy",
-        message="API is operational"
+        message="API is operational",
+        storage=get_storage_mode(),
     )
-
-
-import asyncio
 
 async def _process_image_upload(task_id: str, file: UploadFile, pipeline_func, temp_dir: Path):
     try:
@@ -123,8 +126,7 @@ async def _process_image_upload(task_id: str, file: UploadFile, pipeline_func, t
             
         print(f"[API] Task {task_id}: Processing complete")
         
-        # Upload to Cloudinary
-        print(f"[API] Task {task_id}: Uploading to Cloudinary...")
+        print(f"[API] Task {task_id}: Publishing result via {get_storage_mode()} storage...")
         upload_result = upload_restoration_results(
             task_id=task_id,
             original_path=str(original_path),
@@ -138,7 +140,7 @@ async def _process_image_upload(task_id: str, file: UploadFile, pipeline_func, t
                 detail=f"Upload failed: {upload_result.get('error')}"
             )
             
-        print(f"[API] Task {task_id}: Upload complete")
+        print(f"[API] Task {task_id}: Result publish complete")
         
         # Build response
         response = RestoreResponse(
