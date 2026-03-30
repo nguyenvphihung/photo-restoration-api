@@ -11,6 +11,7 @@ from gfpgan import GFPGANer
 app = FastAPI(title="GFPGAN Worker")
 
 restorer = None
+ALLOW_MODEL_DOWNLOADS = os.getenv("ALLOW_MODEL_DOWNLOADS", "false").lower() in {"1", "true", "yes", "on"}
 
 
 def init_models():
@@ -34,6 +35,11 @@ def init_models():
     model_url  = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth"
     bg_model_path = os.path.join(weights_dir, f"{model_name}.pth")
     if not os.path.exists(bg_model_path):
+        if not ALLOW_MODEL_DOWNLOADS:
+            raise RuntimeError(
+                f"RealESRGAN_x2plus.pth not found at: {bg_model_path}. "
+                "Offline mode is enabled; mount pretrained models before startup."
+            )
         load_file_from_url(url=model_url, model_dir=weights_dir, progress=True, file_name=None)
         
     model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64,
@@ -161,4 +167,4 @@ def enhance(request: EnhanceRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8002)
+    uvicorn.run(app, host="127.0.0.1", port=8003)

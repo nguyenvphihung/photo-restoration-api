@@ -27,6 +27,7 @@ restorer = None
 face_helper = None
 bg_upsampler = None
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+ALLOW_MODEL_DOWNLOADS = os.getenv("ALLOW_MODEL_DOWNLOADS", "false").lower() in {"1", "true", "yes", "on"}
 
 def init_models():
     global restorer, face_helper, bg_upsampler
@@ -43,6 +44,11 @@ def init_models():
     model_path = os.path.join(weights_dir, f"{model_name}.pth")
 
     if not os.path.exists(model_path):
+        if not ALLOW_MODEL_DOWNLOADS:
+            raise RuntimeError(
+                f"CodeFormer weights not found at: {model_path}. "
+                "Offline mode is enabled; mount pretrained models before startup."
+            )
         print(f"Downloading CodeFormer weights to {model_path}...")
         load_file_from_url(url=model_url, model_dir=weights_dir, progress=True, file_name=f"{model_name}.pth")
 
@@ -76,6 +82,11 @@ def init_models():
     bg_model_path = os.path.join(weights_dir, f"{bg_model_name}.pth")
 
     if not os.path.exists(bg_model_path):
+        if not ALLOW_MODEL_DOWNLOADS:
+            raise RuntimeError(
+                f"RealESRGAN_x2plus.pth not found at: {bg_model_path}. "
+                "Offline mode is enabled; mount pretrained models before startup."
+            )
         load_file_from_url(url=bg_model_url, model_dir=weights_dir, progress=True, file_name=None)
 
     bg_model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
@@ -201,4 +212,4 @@ def enhance(request: EnhanceRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8005)
+    uvicorn.run(app, host="127.0.0.1", port=8004)

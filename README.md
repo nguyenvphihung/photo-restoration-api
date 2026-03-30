@@ -25,10 +25,10 @@ graph LR
 
     subgraph "Workers (Microservices)"
         C["Worker 1: ZeroScratches (8001)"]
-        D["Worker 2: Colorization (8003)"]
+        D["Worker 2: Colorization (8002)"]
         E{Smart Router}
-        F["Worker 3a: GFPGAN (8002)"]
-        G["Worker 3b: CodeFormer (8005)"]
+        F["Worker 3a: GFPGAN (8003)"]
+        G["Worker 3b: CodeFormer (8004)"]
     end
 
     A --> B
@@ -103,4 +103,3 @@ Thực thi toàn bộ pipeline cao cấp nhất.
   "faces_detected": 3
 }
 ```
-
