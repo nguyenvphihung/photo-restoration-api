@@ -10,7 +10,7 @@ dependencies:
   - python=3.10
   - pip
   - pip:
-    # FastAPI and server
+    # Canonical pip list: requirements/api.txt
     - fastapi==0.109.0
     - uvicorn[standard]==0.27.0
     - python-multipart==0.0.6
@@ -30,5 +30,6 @@ dependencies:
     # Environment variables
     - python-dotenv==1.0.0
     
-    # HTTP client (optional)
-    - requests
+    # HTTP clients
+    - httpx==0.26.0
+    - requests==2.31.0

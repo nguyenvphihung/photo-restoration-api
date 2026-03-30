@@ -10,6 +10,7 @@ COLORIZATION_URL = os.getenv("COLORIZATION_URL", "http://127.0.0.1:8002/colorize
 GFPGAN_URL = os.getenv("GFPGAN_URL", "http://127.0.0.1:8003/enhance")
 CODEFORMER_URL = os.getenv("CODEFORMER_URL", "http://127.0.0.1:8004/enhance")
 PIPELINE_HTTP_TIMEOUT_SECONDS = float(os.getenv("PIPELINE_HTTP_TIMEOUT_SECONDS", "60"))
+CODEFORMER_HTTP_TIMEOUT_SECONDS = float(os.getenv("CODEFORMER_HTTP_TIMEOUT_SECONDS", "180"))
 
 # Max input resolution (to prevent OOM on 4GB GPU)
 MAX_INPUT_WIDTH = 800
@@ -183,6 +184,11 @@ def _execute_pipeline(
                             "image_path": current_img_path,
                             "output_path": final_path,
                         },
+                        timeout=(
+                            CODEFORMER_HTTP_TIMEOUT_SECONDS
+                            if model_name == "CodeFormer"
+                            else PIPELINE_HTTP_TIMEOUT_SECONDS
+                        ),
                     )
                     resp.raise_for_status()
                     res = resp.json()
@@ -194,6 +200,16 @@ def _execute_pipeline(
                     if not intermediate_path:
                         intermediate_path = final_path
                     print(f"[Pipeline] Step 3 done. Faces detected: {faces_detected} by {model_name}")
+                except httpx.ReadTimeout:
+                    timeout_seconds = (
+                        CODEFORMER_HTTP_TIMEOUT_SECONDS
+                        if model_name == "CodeFormer"
+                        else PIPELINE_HTTP_TIMEOUT_SECONDS
+                    )
+                    return {
+                        "success": False,
+                        "error": f"{model_name} timed out after {timeout_seconds:.0f}s",
+                    }
                 except Exception as exc:
                     return {"success": False, "error": f"{model_name} failed: {exc}"}
 
